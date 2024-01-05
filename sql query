@@ -1,0 +1,96 @@
+/*create table*/
+CREATE TABLE tourist (
+ID NUMBER PRIMARY KEY,
+LATITUDE NUMBER,
+LONGITUDE NUMBER,
+LOCATION MDSYS.SDO_GEOMETRY
+);
+
+CREATE TABLE landmark (
+L_ID NUMBER PRIMARY KEY,
+LOCATION MDSYS.SDO_GEOMETRY
+);
+
+/*import point_uniform.sql & polygon_skewed.sql*/
+
+INSERT INTO USER_SDO_GEOM_METADATA (TABLE_NAME, COLUMN_NAME, DIMINFO, SRID) 
+VALUES (
+'tourist',
+'LOCATION',
+SDO_DIM_ARRAY(
+	SDO_DIM_ELEMENT('X', -180, 180, 0.005),
+	SDO_DIM_ELEMENT('Y', -90, 90)
+	),
+	8307
+);
+/*create Quadtree index*/
+CREATE INDEX T_INDEX ON tourist(LOCATION)
+INDEXTYPE IS MDSYS.SPATIAL_INDEX
+PARAMETERS("SDO_LEVEL = 8");
+
+/*window query - quadtree*/
+SELECT L_ID
+FROM landmark
+WHERE SDO_ANYINTERACT (
+	LOCATION,
+	SDO_GEOMETRY(2003, 8307, NULL, SDO_ELEM_INFO_ARRAY(1,1003,3),
+					SDO_ORDINATE_ARRAY(50,-10,62,15))) = 'TRUE';
+					
+/*point*/
+SELECT tourist.ID, tourist.LATITUDE, tourist.LONGITUDE
+FROM tourist
+WHERE SDO_ANYINTERACT (
+	tourist.LOCATION,
+	SDO_GEOMETRY(2003, 8307, SDO_POINT_TYPE(5,6,NULL), NULL,
+					NULL)) = 'TRUE';
+
+/*make sure next time operate without cache*/
+alter system flush buffer_cache;
+alter system flush shared_pool;
+
+/*optimize Z-order*/
+OPTIMIZE tourist
+WHERE ID >= 1
+ZORDER BY (LOCATION);
+
+/*window query - Z-order quadtree*/
+SELECT L_ID
+FROM landmark
+WHERE SDO_ANYINTERACT (
+	LOCATION,
+	SDO_GEOMETRY(2003, 8307, NULL, SDO_ELEM_INFO_ARRAY(1,1003,3),
+					SDO_ORDINATE_ARRAY(50,-10,62,15))) = 'TRUE';
+					
+/*window query - point*/
+SELECT tourist.ID, tourist.LATITUDE, tourist.LONGITUDE
+FROM tourist
+WHERE SDO_ANYINTERACT (
+	tourist.LOCATION,
+	SDO_GEOMETRY(2003, 8307, SDO_POINT_TYPE(5,6,NULL), NULL,
+					NULL)) = 'TRUE';
+
+/*clean cache*/
+alter system flush buffer_cache;
+alter system flush shared_pool;
+
+/*KNN query - point*/
+SELECT ID
+FROM tourist
+WHERE SDO_NN(
+	LOCATION,
+	SDO_GEOMETRY(
+		2001, 8307, SDO_POINT_TYPE(5,6,NULL),
+		NULL,
+		NULL),
+	'SDO_NUM_RES = 1') = 'TRUE';
+	
+/*KNN - POLYGON*/
+SELECT L_ID
+FROM landmark
+WHERE SDO_NN(
+	LOCATION,
+	SDO_GEOMETRY(
+		2001, 8307, NULL,
+		SDO_ELEM_INFO_ARRAY(1,1003,3),
+		SDO_ORDINATE_ARRAY(50,-10,62,15)),
+	'SDO_NUM_RES = 1') = 'TRUE';
